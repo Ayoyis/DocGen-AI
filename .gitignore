@@ -4,3 +4,11 @@ node_modules
 __pycache__
 *.pyc
 .venv
+# Models and data _ DO NOT COMMIT
+models/
+*.bin
+*.safetensors
+*.pt
+*.pth
+data/faiss/
+*.index
