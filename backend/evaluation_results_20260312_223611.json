@@ -1,0 +1,20 @@
+{
+  "status": "success",
+  "with_rag": {
+    "bleu": 0.002,
+    "rougeL": 0.0146,
+    "meteor": 0.0209,
+    "avg_time_ms": 0.12
+  },
+  "without_rag": {
+    "bleu": 0.002,
+    "rougeL": 0.0146,
+    "meteor": 0.0209,
+    "avg_time_ms": 0.11
+  },
+  "improvement": {
+    "bleu": 0.0,
+    "rougeL": 0.0,
+    "meteor": 0.0
+  }
+}

@@ -17,7 +17,9 @@ import {
   LassoIcon,
   ChevronDown as ChevronDownIcon
 } from "lucide-react";
-import Navbar from "@/components/Navbar";
+import Navbar from "@/components/Navbar"
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 
 // Language options
 const languages = [
@@ -46,6 +48,14 @@ interface GenerateResponse {
 }
 
 export default function GeneratePage() {
+  const router = useRouter();
+  
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      router.push("/login"); // Redirect to login if not authenticated
+    }
+  }, [router]);
   const [code, setCode] = useState("");
   const [language, setLanguage] = useState("python");
   const [loading, setLoading] = useState(false);

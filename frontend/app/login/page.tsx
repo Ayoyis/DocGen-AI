@@ -17,9 +17,13 @@ const loginSchema = z.object({
 
 type LoginForm = z.infer<typeof loginSchema>;
 
+// API base URL - change for production
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
 export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
 
   const {
     register,
@@ -30,11 +34,58 @@ export default function LoginPage() {
   });
 
   const onSubmit = async (data: LoginForm) => {
-    setIsLoading(true);
-    // TODO: Implement actual login logic
-    console.log("Login data:", data);
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+  setIsLoading(true);
+  setError("");
+  
+  try {
+    const params = new URLSearchParams();
+    params.append("email", data.email);
+    params.append("password", data.password);
+    
+    const res = await fetch(`${API_URL}/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString(),
+    });
+
+    // Read the body ONCE
+    const responseData = await res.json();
+    
+    if (!res.ok) {
+      const detail = responseData.detail;
+      throw new Error(
+        typeof detail === "string"
+          ? detail
+          : Array.isArray(detail)
+          ? detail.map((e: any) => e.msg).join(", ")
+          : "Login failed"
+      );
+    }
+    
+    const { access_token, name } = responseData;
+    localStorage.setItem("token", access_token);
+    localStorage.setItem("email", data.email);
+    localStorage.setItem("name", name);
+    window.dispatchEvent(new Event("auth-change"));
+    window.location.href = "/generate";
+  } catch (err: any) {
+    setError(err.message);
+  } finally {
     setIsLoading(false);
+  }
+};
+
+
+
+
+  const handleGithubLogin = () => {
+    // GitHub OAuth - requires backend setup (see below)
+    window.location.href = `${API_URL}/auth/github`;
+  };
+
+  const handleGoogleLogin = () => {
+    // Google OAuth - requires backend setup (see below)
+    window.location.href = `${API_URL}/auth/google`;
   };
 
   return (
@@ -54,6 +105,12 @@ export default function LoginPage() {
                 Sign in to access your account
               </p>
             </div>
+
+            {error && (
+              <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+                {error}
+              </div>
+            )}
 
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
               <Input
@@ -124,11 +181,17 @@ export default function LoginPage() {
               </div>
 
               <div className="mt-6 grid grid-cols-2 gap-3">
-                <button className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-colors">
+                <button 
+                  onClick={handleGithubLogin}
+                  className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-colors"
+                >
                   <Github className="w-5 h-5" />
                   <span className="text-sm">GitHub</span>
                 </button>
-                <button className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-colors">
+                <button 
+                  onClick={handleGoogleLogin}
+                  className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-colors"
+                >
                   <Mail className="w-5 h-5" />
                   <span className="text-sm">Google</span>
                 </button>

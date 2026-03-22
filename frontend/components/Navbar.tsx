@@ -1,200 +1,173 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { useState, useEffect } from "react";
-import { 
-  Menu, 
-  X, 
-  Sparkles, 
-  Github, 
-  ArrowRight,
-  ChevronDown,
-  Terminal
-} from "lucide-react";
+import { Terminal, User, LogOut, Loader2 } from "lucide-react";
 
-const navLinks = [
-  { name: "Generate", href: "/generate", badge: "New" },
-  { name: "Documentation", href: "/docs" },
-  { name: "Pricing", href: "/pricing" },
-];
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export default function Navbar() {
-  const [isScrolled, setIsScrolled] = useState(false);
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [activeLink, setActiveLink] = useState("");
+  const [user, setUser] = useState<{ name: string; email: string } | null>(null);
+  const [isLoading, setIsLoading] = useState(true); // Add loading state
+
+  // Check auth status
+  const checkAuth = () => {
+    const token = localStorage.getItem("token");
+    const email = localStorage.getItem("email");
+    const name = localStorage.getItem("name"); // Store name too if available
+    
+    console.log("checkAuth:", { token: !!token, email, name });
+
+    if (token && email) {
+      setUser({ 
+        name: name || email.split('@')[0], 
+        email 
+      });
+    } else {
+      setUser(null);
+    }
+    setIsLoading(false);
+  };
 
   useEffect(() => {
-    const handleScroll = () => {
-      setIsScrolled(window.scrollY > 20);
+    checkAuth();
+    
+    // Listen for auth changes (e.g., from OAuth callback in different tab)
+    window.addEventListener('storage', checkAuth);
+    
+    // Custom event for same-window updates
+    window.addEventListener('auth-change', checkAuth);
+    
+    return () => {
+      window.removeEventListener('storage', checkAuth);
+      window.removeEventListener('auth-change', checkAuth);
     };
-    window.addEventListener("scroll", handleScroll);
-    return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  return (
-    <>
-      <motion.nav
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-        className="fixed top-0 left-0 right-0 z-50"
-      >
-        <div 
-          className={`transition-all duration-500 ${
-            isScrolled 
-              ? "bg-slate-950/80 backdrop-blur-2xl border-b border-white/10 shadow-2xl shadow-black/50" 
-              : "bg-transparent"
-          }`}
-        >
-          <div className="max-w-7xl mx-auto px-6 lg:px-8">
-            <div className="flex items-center justify-between h-20">
-              
-              {/* Logo */}
-              <Link href="/" className="flex items-center gap-3 group">
-                <motion.div 
-                  whileHover={{ rotate: 180 }}
-                  transition={{ duration: 0.3 }}
-                  className="relative"
-                >
-                  <div className="absolute inset-0 bg-indigo-500 blur-lg opacity-50 group-hover:opacity-75 transition-opacity" />
-                  <div className="relative p-2 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 border border-white/20">
-                    <Terminal className="w-5 h-5 text-white" />
-                  </div>
-                </motion.div>
-                
-                <div className="flex flex-col">
-                  <span className="text-lg font-bold bg-gradient-to-r from-white to-slate-300 bg-clip-text text-transparent tracking-tight">
-                    DocGen AI
-                  </span>
-                  <span className="text-[10px] text-slate-500 font-medium tracking-wider uppercase">
-                    Documentation
-                  </span>
-                </div>
-              </Link>
+  const handleLogout = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("email");
+    localStorage.removeItem("name");
+    setUser(null);
+    window.dispatchEvent(new Event('auth-change')); // Notify other components
+    window.location.href = "/login";
+  };
 
-              {/* Desktop Navigation */}
-              <div className="hidden md:flex items-center gap-1">
-                {navLinks.map((link) => (
-                  <Link
-                    key={link.name}
-                    href={link.href}
-                    onMouseEnter={() => setActiveLink(link.name)}
-                    onMouseLeave={() => setActiveLink("")}
-                    className="relative px-4 py-2 text-sm font-medium text-slate-300 hover:text-white transition-colors group"
-                  >
-                    <span className="relative z-10 flex items-center gap-1.5">
-                      {link.name}
-                      {link.badge && (
-                        <span className="px-1.5 py-0.5 text-[10px] font-bold bg-indigo-500/20 text-indigo-300 rounded-full border border-indigo-500/30">
-                          {link.badge}
-                        </span>
-                      )}
-                    </span>
-                    
-                    <motion.div
-                      initial={false}
-                      animate={{
-                        opacity: activeLink === link.name ? 1 : 0,
-                        scale: activeLink === link.name ? 1 : 0.95,
-                      }}
-                      className="absolute inset-0 rounded-lg bg-white/5 border border-white/10"
-                    />
-                    
-                    <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity" />
-                  </Link>
-                ))}
-              </div>
-
-              {/* Right Side Actions */}
-              <div className="hidden md:flex items-center gap-4">
-                <Link 
-                  href="https://github.com" 
-                  target="_blank"
-                  className="p-2 text-slate-400 hover:text-white transition-colors hover:bg-white/5 rounded-lg"
-                >
-                  <Github className="w-5 h-5" />
-                </Link>
-
-                <div className="h-6 w-px bg-white/10" />
-
-                <Link href="/signup">                  
-                  <motion.button                    
-                    whileHover={{ scale: 1.02 }}                    
-                    whileTap={{ scale: 0.98 }}                    
-                    className="group relative flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-sm font-semibold shadow-lg shadow-indigo-600/25 overflow-hidden"                    
-                  >                    
-                    <Sparkles className="w-4 h-4" />                    
-                    <span>Get Started</span>                    
-                  </motion.button>                  
-                </Link>                
-              </div>
-
-              {/* Mobile Menu Button */}
-              <button
-                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-                className="md:hidden p-2 text-slate-300 hover:text-white transition-colors"
-              >
-                {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-              </button>
+  // Don't show buttons while checking auth (prevents flash)
+  if (isLoading) {
+    return (
+      <nav className="fixed top-0 left-0 right-0 z-50 border-b border-white/5 bg-[#0a0a0f]/40 backdrop-blur-md">
+        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 rounded-lg bg-gradient-to-br from-indigo-600 to-violet-600">
+              <Terminal className="w-4 h-4 text-white" />
             </div>
+            <span className="text-base font-bold text-white">DocGen AI</span>
           </div>
+          <Loader2 className="w-4 h-4 text-slate-400 animate-spin" />
+        </div>
+      </nav>
+    );
+  }
+
+  return (
+    <motion.nav
+      initial={{ opacity: 0, y: -20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="fixed top-0 left-0 right-0 z-50 border-b border-white/5 bg-[#0a0a0f]/40 backdrop-blur-md"
+    >
+      <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+        {/* Logo */}
+        <Link href="/" className="flex items-center gap-2 group">
+          <motion.div 
+            whileHover={{ rotate: 180 }}
+            transition={{ duration: 0.3 }}
+            className="relative"
+          >
+            <div className="absolute inset-0 bg-indigo-500 blur-lg opacity-50 group-hover:opacity-75 transition-opacity" />
+            <div className="relative p-1.5 rounded-lg bg-gradient-to-br from-indigo-600 to-violet-600 border border-white/20">
+              <Terminal className="w-4 h-4 text-white" />
+            </div>
+          </motion.div>
+          
+          <div className="flex flex-col">
+            <span className="text-base font-bold bg-gradient-to-r from-white to-slate-300 bg-clip-text text-transparent">
+              DocGen AI
+            </span>
+            <span className="text-[9px] text-slate-500 font-medium tracking-wider uppercase">
+              Documentation
+            </span>
+          </div>
+        </Link>
+
+        {/* Navigation */}
+        <div className="hidden md:flex items-center gap-6">
+          <Link href="/" className="text-sm text-slate-400 hover:text-white transition-colors">
+            Home
+          </Link>
+          <Link href="/generate" className="text-sm text-slate-400 hover:text-white transition-colors">
+            Generate
+          </Link>
+          <Link href="/docs" className="text-sm text-slate-400 hover:text-white transition-colors">
+            Docs
+          </Link>
+          <Link href="/pricing" className="text-sm text-slate-400 hover:text-white transition-colors">
+            Pricing
+          </Link>
         </div>
 
-        {/* Mobile Menu */}
-        <AnimatePresence>
-          {isMobileMenuOpen && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.3, ease: "easeInOut" }}
-              className="md:hidden bg-slate-950/95 backdrop-blur-2xl border-b border-white/10 overflow-hidden"
-            >
-              <div className="px-6 py-6 space-y-4">
-                {navLinks.map((link, idx) => (
-                  <motion.div
-                    key={link.name}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: idx * 0.1 }}
-                  >
-                    <Link
-                      href={link.href}
-                      onClick={() => setIsMobileMenuOpen(false)}
-                      className="flex items-center justify-between py-3 text-lg font-medium text-slate-300 hover:text-white transition-colors border-b border-white/5"
-                    >
-                      <span>{link.name}</span>
-                      {link.badge && (
-                        <span className="px-2 py-1 text-xs font-bold bg-indigo-500/20 text-indigo-300 rounded-full">
-                          {link.badge}
-                        </span>
-                      )}
-                      <ChevronDown className="w-4 h-4 rotate-[-90deg]" />
-                    </Link>
-                  </motion.div>
-                ))}
+        {/* Auth Buttons - With AnimatePresence for smooth transitions */}
+        <div className="flex items-center gap-3">
+          <AnimatePresence mode="wait">
+            {user ? (
+              <motion.div
+                key="user"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="flex items-center gap-3"
+              >
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/10 backdrop-blur-sm">
+                  <div className="w-6 h-6 rounded-full bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center">
+                    <User className="w-3 h-3 text-white" />
+                  </div>
+                  <span className="text-sm text-slate-300 font-medium">{user.name}</span>
+                </div>
                 
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.3 }}
-                  className="pt-4"
+                <button
+                  onClick={handleLogout}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors border border-transparent hover:border-red-500/20"
                 >
-                  <Link href="/generate" onClick={() => setIsMobileMenuOpen(false)}>
-                    <button className="w-full flex items-center justify-center gap-2 py-4 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-semibold shadow-lg shadow-indigo-600/25">
-                      <Sparkles className="w-5 h-5" />
-                      Get Started Free
-                    </button>
-                  </Link>
-                </motion.div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </motion.nav>
-
-      {/* REMOVED: <div className="h-20" /> */}
-    </>
+                  <LogOut className="w-4 h-4" />
+                  <span className="hidden sm:inline">Logout</span>
+                </button>
+              </motion.div>
+            ) : (
+              <motion.div
+                key="auth"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="flex items-center gap-3"
+              >
+                <Link 
+                  href="/login" 
+                  className="text-sm text-slate-400 hover:text-white transition-colors px-3 py-1.5"
+                >
+                  Sign In
+                </Link>
+                <Link
+                  href="/signup"
+                  className="px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-sm font-medium transition-all shadow-lg shadow-indigo-600/20 hover:shadow-indigo-600/40 hover:scale-105 active:scale-95"
+                >
+                  Get Started
+                </Link>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </div>
+    </motion.nav>
   );
 }

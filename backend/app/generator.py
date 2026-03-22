@@ -122,15 +122,16 @@ def identify_lines_needing_comments(code: str, language: str) -> List[Tuple[int,
     """Multi-language comment identification."""
     language = (language or "python").lower()
 
-    # ── FIX 4: Actually use _lang_rules to get the correct comment prefix ────
     rules = _lang_rules(language)
-    prefix = rules["comment_prefix"]   # "# " for Python, "// " for everything else
+    prefix = rules["comment_prefix"]
 
     lines = code.split('\n')
     comments_needed = []
+    current_function_indent = None  # Track if we're inside a function
 
     for i, line in enumerate(lines, 1):
         stripped = line.strip()
+        indent = len(line) - len(line.lstrip())
 
         if not stripped:
             continue
@@ -147,40 +148,39 @@ def identify_lines_needing_comments(code: str, language: str) -> List[Tuple[int,
 
         # ── Python ───────────────────────────────────────────────────────────
         if language == 'python':
-            func_match  = re.match(r'def\s+(\w+)\s*\(', stripped)
+            # Check for function/class definitions
+            func_match = re.match(r'def\s+(\w+)', stripped)
             class_match = re.match(r'class\s+(\w+)', stripped)
 
             if func_match:
                 description = _describe_from_name(func_match.group(1))
                 comments_needed.append((i, f"{prefix}Function to {description}"))
-                continue
-            if class_match:
+                current_function_indent = indent  # Track function indentation
+                # Don't continue - also check this line for other patterns
+            elif class_match:
                 description = _describe_from_name(class_match.group(1))
                 comments_needed.append((i, f"{prefix}Class representing {description}"))
-                continue
+                current_function_indent = indent
 
         # ── JavaScript / TypeScript ──────────────────────────────────────────
         elif language in ['javascript', 'typescript']:
-            func_match  = re.match(r'function\s+(\w+)\s*\(', stripped)
-            arrow_func  = re.match(r'(?:const|let|var)\s+(\w+)\s*=', stripped)
+            func_match = re.match(r'function\s+(\w+)\s*\(', stripped)
+            arrow_func = re.match(r'(?:const|let|var)\s+(\w+)\s*=', stripped)
             class_match = re.match(r'class\s+(\w+)', stripped)
 
             if func_match:
                 description = _describe_from_name(func_match.group(1))
                 comments_needed.append((i, f"{prefix}Function to {description}"))
-                continue
-            if arrow_func and '=>' in stripped:
+            elif arrow_func and '=>' in stripped:
                 description = _describe_from_name(arrow_func.group(1))
                 comments_needed.append((i, f"{prefix}Arrow function to {description}"))
-                continue
-            if class_match:
+            elif class_match:
                 description = _describe_from_name(class_match.group(1))
                 comments_needed.append((i, f"{prefix}Class representing {description}"))
-                continue
 
         # ── Java / C++ ───────────────────────────────────────────────────────
         elif language in ['java', 'cpp', 'c++']:
-            class_match  = re.match(r'class\s+(\w+)', stripped)
+            class_match = re.match(r'class\s+(\w+)', stripped)
             method_match = re.match(
                 r'(?:public|private|protected)?\s*(?:static\s+)?(?:\w+\s+)+(\w+)\s*\([^)]*\)\s*\{?',
                 stripped
@@ -189,15 +189,15 @@ def identify_lines_needing_comments(code: str, language: str) -> List[Tuple[int,
             if class_match:
                 description = _describe_from_name(class_match.group(1))
                 comments_needed.append((i, f"{prefix}Class representing {description}"))
-                continue
-            if method_match:
+            elif method_match:
                 method_name = method_match.group(1)
                 if method_name not in ('if', 'while', 'for', 'switch', 'catch', 'try'):
                     description = _describe_from_name(method_name)
                     comments_needed.append((i, f"{prefix}Method to {description}"))
-                    continue
 
         # ── Inside-function logic ────────────────────────────────────────────
+        # Only process if we're inside a function (indent > function indent)
+        # or at module level for variable assignments
         var_match = re.match(
             r'(?:const|let|var|int|float|double|string|auto|boolean|bool|'
             r'public|private|protected)?\s*(?:static\s+)?(?:final\s+)?(?:\w+\s+)?(\w+)\s*[=:]',
@@ -205,21 +205,19 @@ def identify_lines_needing_comments(code: str, language: str) -> List[Tuple[int,
         )
         var_name = var_match.group(1).lower() if var_match else ""
 
-        # Use a set for O(1) lookups instead of a list
         skip_words = {
             'int', 'float', 'double', 'string', 'auto', 'boolean', 'bool',
             'public', 'private', 'protected', 'static', 'final', 'void',
-            'return', 'class', 'if', 'else', 'for', 'while', 'new'
+            'return', 'class', 'if', 'else', 'for', 'while', 'new', 'try', 'except'
         }
         if var_name in skip_words:
             var_name = ""
 
         has_operator = any(op in stripped for op in ('+', '-', '*', '/', '%'))
 
+        # Variable assignments
         if '=' in stripped and not stripped.startswith('return'):
-            # Variable assignment - check for specific patterns
             if has_operator:
-                # Calculations with operators
                 if 'total' in var_name or 'sum' in stripped.lower():
                     comments_needed.append((i, f"{prefix}Calculate total"))
                 elif 'tax' in var_name:
@@ -237,39 +235,70 @@ def identify_lines_needing_comments(code: str, language: str) -> List[Tuple[int,
                 else:
                     comments_needed.append((i, f"{prefix}Update value"))
             else:
-                # Simple assignment without operators (e.g., user input, API calls)
+                # Simple assignments
                 if 'input' in stripped.lower():
                     comments_needed.append((i, f"{prefix}Get user input"))
                 elif 'parse' in stripped.lower():
                     comments_needed.append((i, f"{prefix}Parse data"))
-                else:
-                    description = _describe_from_name(var_name) if var_name else "value"
+                elif 'open' in stripped.lower() and ('file' in stripped.lower() or '.csv' in stripped.lower()):
+                    comments_needed.append((i, f"{prefix}Open file for processing"))
+                elif 'logging' in stripped.lower() or 'getLogger' in stripped:
+                    comments_needed.append((i, f"{prefix}Configure logging"))
+                elif 'json.load' in stripped or 'csv.DictReader' in stripped:
+                    comments_needed.append((i, f"{prefix}Load data from file"))
+                elif var_name and not var_name.startswith('_'):
+                    description = _describe_from_name(var_name)
                     comments_needed.append((i, f"{prefix}Initialize {description}"))
 
-        elif stripped.startswith(('if ', 'else if')):
-            if 'member' in stripped.lower() or 'vip' in stripped.lower():
+        # Control flow
+        elif stripped.startswith(('if ', 'elif ')):
+            if 'try' in stripped.lower() or 'except' in stripped.lower():
+                comments_needed.append((i, f"{prefix}Handle error condition"))
+            elif 'member' in stripped.lower() or 'vip' in stripped.lower():
                 comments_needed.append((i, f"{prefix}Check membership status"))
             elif 'valid' in stripped.lower():
                 comments_needed.append((i, f"{prefix}Validate input"))
-            elif 'null' in stripped.lower() or 'none' in stripped.lower():
+            elif 'null' in stripped.lower() or 'none' in stripped.lower() or 'not ' in stripped.lower():
                 comments_needed.append((i, f"{prefix}Check for null/None value"))
+            elif 'in' in stripped.lower() and ('list' in stripped.lower() or 'dict' in stripped.lower()):
+                comments_needed.append((i, f"{prefix}Check if item exists"))
             else:
                 comments_needed.append((i, f"{prefix}Check condition"))
 
-        elif stripped in ('else', 'else:'):
+        elif stripped in ('else:', 'else'):
             comments_needed.append((i, f"{prefix}Otherwise"))
 
         elif stripped.startswith(('for ', 'while ')):
-            comments_needed.append((i, f"{prefix}Iterate through items"))
+            if 'file' in stripped.lower() or 'path' in stripped.lower():
+                comments_needed.append((i, f"{prefix}Process each file"))
+            elif 'record' in stripped.lower() or 'row' in stripped.lower():
+                comments_needed.append((i, f"{prefix}Process each record"))
+            else:
+                comments_needed.append((i, f"{prefix}Iterate through items"))
 
-        elif 'try' in stripped or 'catch' in stripped:
+        elif stripped.startswith('try:') or stripped.startswith('except'):
             comments_needed.append((i, f"{prefix}Handle exceptions"))
 
         elif stripped.startswith('return'):
-            if 'total' in stripped.lower():
+            if 'results' in stripped.lower() or 'data' in stripped.lower():
+                comments_needed.append((i, f"{prefix}Return processed data"))
+            elif 'total' in stripped.lower() or 'sum' in stripped.lower():
                 comments_needed.append((i, f"{prefix}Return final result"))
             else:
                 comments_needed.append((i, f"{prefix}Return value"))
+
+        # Add these patterns to your variable detection:
+
+        if 'results' in var_name:
+             comments_needed.append((i, f"{prefix}Initialize results container"))
+        elif 'queue' in var_name or 'stack' in var_name:
+             comments_needed.append((i, f"{prefix}Initialize {var_name} for traversal"))
+        elif 'soup' in var_name or 'BeautifulSoup' in stripped:
+             comments_needed.append((i, f"{prefix}Parse HTML content"))
+        elif 'urljoin' in stripped or 'urlparse' in stripped:
+             comments_needed.append((i, f"{prefix}Resolve URL components"))
+        elif 'async' in stripped and 'def' in stripped:
+             comments_needed.append((i, f"{prefix}Async method to {description}"))
 
     # Remove duplicates while preserving order
     seen: set = set()
@@ -279,7 +308,8 @@ def identify_lines_needing_comments(code: str, language: str) -> List[Tuple[int,
             seen.add(line_num)
             unique.append((line_num, comment))
 
-    return unique[:6]
+    # FIX: Remove the [:6] limit or increase it significantly
+    return unique  # Return all comments, not just 6
 
 
 def generate_template_docstring(code: str, func_name: str, language: str) -> str:

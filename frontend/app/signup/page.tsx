@@ -6,7 +6,7 @@ import { motion } from "framer-motion";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Eye, EyeOff, Github, Mail, CheckCircle2 } from "lucide-react";
+import { Eye, EyeOff, Github, Chrome, CheckCircle2 } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import { Input } from "@/components/Input";
 
@@ -26,10 +26,14 @@ const signupSchema = z.object({
 
 type SignupForm = z.infer<typeof signupSchema>;
 
+// API URL - backend address
+const API_URL = "http://localhost:8000";
+
 export default function SignupPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [error, setError] = useState("");
 
   const {
     register,
@@ -49,15 +53,63 @@ export default function SignupPage() {
     { label: "One number", met: /[0-9]/.test(password) },
   ];
 
+  // Sign up with email/password
   const onSubmit = async (data: SignupForm) => {
-    setIsLoading(true);
-    // TODO: Implement actual signup logic
-    console.log("Signup data:", data);
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    setIsLoading(false);
+  setIsLoading(true);
+  setError("");
+  
+  try {
+    const res = await fetch(`${API_URL}/auth/signup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: data.name,
+        email: data.email,
+        password: data.password,
+      }),
+    });
+    
+    if (!res.ok) {
+      const err = await res.json();
+  console.log("Full error:", JSON.stringify(err, null, 2)); // add this
+  const detail = err.detail;
+  throw new Error(
+    typeof detail === "string"
+      ? detail
+      : Array.isArray(detail)
+      ? detail.map((e: any) => e.msg).join(", ")
+      : "Signup failed"
+      );
+    }
+
+    const responseData = await res.json();
+    console.log("Signup response:", responseData);
+
+    localStorage.setItem("token", responseData.access_token);
+    localStorage.setItem("email", data.email);
+    localStorage.setItem("name", data.name);
+    window.dispatchEvent(new Event("auth-change"));
+
     setIsSuccess(true);
+  } catch (err: any) {
+    setError(err.message);
+  } finally {
+    setIsLoading(false);
+  }
+};
+
+
+  // Sign up with GitHub
+  const handleGithubSignup = () => {
+    window.location.href = `${API_URL}/auth/github`;
   };
 
+  // Sign up with Google
+  const handleGoogleSignup = () => {
+    window.location.href = `${API_URL}/auth/google`;
+  };
+
+  // Show success message after signup
   if (isSuccess) {
     return (
       <div className="min-h-screen bg-[#0a0a0f] text-slate-200">
@@ -72,7 +124,7 @@ export default function SignupPage() {
               <CheckCircle2 className="w-16 h-16 text-emerald-400 mx-auto mb-4" />
               <h1 className="text-2xl font-bold mb-2">Account Created!</h1>
               <p className="text-slate-400 mb-6">
-                Check your email to verify your account.
+                Your account has been created successfully.
               </p>
               <Link
                 href="/login"
@@ -104,6 +156,13 @@ export default function SignupPage() {
                 Start generating documentation for free
               </p>
             </div>
+
+            {/* Error message */}
+            {error && (
+              <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+                {error}
+              </div>
+            )}
 
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
               <Input
@@ -212,12 +271,18 @@ export default function SignupPage() {
               </div>
 
               <div className="mt-6 grid grid-cols-2 gap-3">
-                <button className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-colors">
+                <button 
+                  onClick={handleGithubSignup}
+                  className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-colors"
+                >
                   <Github className="w-5 h-5" />
                   <span className="text-sm">GitHub</span>
                 </button>
-                <button className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-colors">
-                  <Mail className="w-5 h-5" />
+                <button 
+                  onClick={handleGoogleSignup}
+                  className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-colors"
+                >
+                  <Chrome className="w-5 h-5" />
                   <span className="text-sm">Google</span>
                 </button>
               </div>
