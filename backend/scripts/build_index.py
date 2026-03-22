@@ -12,7 +12,7 @@ import faiss
 
 LANG = "python"
 BASE = Path(__file__).resolve().parent.parent
-IN_PATH = BASE / "data" / "processed" / f"{LANG}_train.jsonl"
+IN_PATH = BASE / "data" / "processed" / f"{LANG}_train_docs.jsonl"
 
 OUT_DIR = BASE / "data" / "faiss"
 OUT_DIR.mkdir(parents=True, exist_ok=True)

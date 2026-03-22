@@ -526,7 +526,7 @@ def github_callback(code: str, db: Session = Depends(get_db)):
     )
     
     # Redirect to frontend with token
-    return RedirectResponse(f"https://your-frontend-url.vercel.app/auth/callback?token={token}")
+    return RedirectResponse(f"https://docgen-ai.vercel.app/auth/callback?token={token}")
 
 # Google OAuth (FREE - no cost for basic usage)
 @app.get("/auth/google")

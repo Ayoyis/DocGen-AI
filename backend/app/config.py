@@ -35,6 +35,19 @@ class Settings(BaseSettings):
     codebert_model: str = "microsoft/codebert-base"
     codet5_model: str = "Salesforce/codet5-base"
 
+    # ── Auth & OAuth ──────────────────────────────────────────────────────────
+    github_client_id: str = ""
+    github_client_secret: str = ""
+    google_client_id: str = ""
+    google_client_secret: str = ""
+
+    # ── JWT ───────────────────────────────────────────────────────────────────
+    jwt_secret: str = ""
+
+    # ── Mail ──────────────────────────────────────────────────────────────────
+    mail_username: str = ""
+    mail_password: str = ""
+
     # ── FAISS paths ───────────────────────────────────────────────────────────
     # Override faiss_dir to relocate all FAISS files at once.
     # Override index_path / meta_path individually for custom layouts.
