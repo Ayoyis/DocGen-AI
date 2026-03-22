@@ -41,3 +41,13 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+
+# Models
+backend/models/
+backend/data/processed/
+backend/data/faiss/
+*.pt
+*.pth
+*.safetensors
+*.index
+*.jsonl
