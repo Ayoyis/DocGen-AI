@@ -120,14 +120,17 @@ def identify_lines_needing_comments(code: str, language: str) -> List[Tuple[int,
         if not stripped:
             continue
 
+        # Skip existing comments
         if stripped.startswith(('#', '//', '/*', '*', '"""', "'''")):
             continue
 
+        # Skip lone structural tokens
         if stripped in ('{', '}', '(', ')', ';', ');', '};', ']:', '):'):
             continue
 
         func_match = class_match = arrow_func = method_match = None
 
+        # ── Python ───────────────────────────────────────────────────────────
         if language == 'python':
             func_match = re.match(r'def\s+(\w+)', stripped)
             class_match = re.match(r'class\s+(\w+)', stripped)
@@ -141,6 +144,7 @@ def identify_lines_needing_comments(code: str, language: str) -> List[Tuple[int,
                 comments_needed.append((i, f"{prefix}Class representing {description}"))
                 current_function_indent = indent
 
+        # ── JavaScript / TypeScript ──────────────────────────────────────────
         elif language in ['javascript', 'typescript']:
             func_match = re.match(r'function\s+(\w+)\s*\(', stripped)
             arrow_func = re.match(r'(?:const|let|var)\s+(\w+)\s*=', stripped)
@@ -156,10 +160,11 @@ def identify_lines_needing_comments(code: str, language: str) -> List[Tuple[int,
                 description = _describe_from_name(class_match.group(1))
                 comments_needed.append((i, f"{prefix}Class representing {description}"))
 
+        # ── Java / C++ ───────────────────────────────────────────────────────
         elif language in ['java', 'cpp', 'c++']:
             class_match = re.match(r'class\s+(\w+)', stripped)
             method_match = re.match(
-                r'(?:public|private|protected)\s+(?:static\s+)?(?:\w+\s+)+(\w+)\s*\(',
+                r'(?:public|private|protected)?\s*(?:static\s+)?(?:\w+\s+)+(\w+)\s*\([^)]*\)\s*\{?',
                 stripped
             )
 
@@ -167,10 +172,119 @@ def identify_lines_needing_comments(code: str, language: str) -> List[Tuple[int,
                 description = _describe_from_name(class_match.group(1))
                 comments_needed.append((i, f"{prefix}Class representing {description}"))
             elif method_match:
-                description = _describe_from_name(method_match.group(1))
-                comments_needed.append((i, f"{prefix}Method to {description}"))
+                method_name = method_match.group(1)
+                if method_name not in ('if', 'while', 'for', 'switch', 'catch', 'try'):
+                    description = _describe_from_name(method_name)
+                    comments_needed.append((i, f"{prefix}Method to {description}"))
 
-    seen = set()
+        # ── Variable assignments & control flow ──────────────────────────────
+        var_match = re.match(
+            r'(?:const|let|var|int|float|double|string|auto|boolean|bool|'
+            r'public|private|protected)?\s*(?:static\s+)?(?:final\s+)?(?:\w+\s+)?(\w+)\s*[=:]',
+            stripped
+        )
+        var_name = var_match.group(1).lower() if var_match else ""
+
+        skip_words = {
+            'int', 'float', 'double', 'string', 'auto', 'boolean', 'bool',
+            'public', 'private', 'protected', 'static', 'final', 'void',
+            'return', 'class', 'if', 'else', 'for', 'while', 'new', 'try', 'except'
+        }
+        if var_name in skip_words:
+            var_name = ""
+
+        has_operator = any(op in stripped for op in ('+', '-', '*', '/', '%'))
+
+        # Variable assignments
+        if '=' in stripped and not stripped.startswith('return'):
+            if has_operator:
+                if 'total' in var_name or 'sum' in stripped.lower():
+                    comments_needed.append((i, f"{prefix}Calculate total"))
+                elif 'tax' in var_name:
+                    comments_needed.append((i, f"{prefix}Calculate tax"))
+                elif 'discount' in var_name:
+                    comments_needed.append((i, f"{prefix}Apply discount"))
+                elif 'price' in var_name or 'cost' in var_name:
+                    comments_needed.append((i, f"{prefix}Calculate price"))
+                elif 'avg' in var_name or 'average' in var_name:
+                    comments_needed.append((i, f"{prefix}Calculate average"))
+                elif 'count' in var_name:
+                    comments_needed.append((i, f"{prefix}Count items"))
+                elif '*' in stripped or '/' in stripped:
+                    comments_needed.append((i, f"{prefix}Perform calculation"))
+                else:
+                    comments_needed.append((i, f"{prefix}Update value"))
+            else:
+                if 'input' in stripped.lower():
+                    comments_needed.append((i, f"{prefix}Get user input"))
+                elif 'parse' in stripped.lower():
+                    comments_needed.append((i, f"{prefix}Parse data"))
+                elif 'open' in stripped.lower() and ('file' in stripped.lower() or '.csv' in stripped.lower()):
+                    comments_needed.append((i, f"{prefix}Open file for processing"))
+                elif 'logging' in stripped.lower() or 'getLogger' in stripped:
+                    comments_needed.append((i, f"{prefix}Configure logging"))
+                elif 'json.load' in stripped or 'csv.DictReader' in stripped:
+                    comments_needed.append((i, f"{prefix}Load data from file"))
+                elif var_name and not var_name.startswith('_'):
+                    description = _describe_from_name(var_name)
+                    comments_needed.append((i, f"{prefix}Initialize {description}"))
+
+        # Control flow
+        elif stripped.startswith(('if ', 'elif ')):
+            if 'try' in stripped.lower() or 'except' in stripped.lower():
+                comments_needed.append((i, f"{prefix}Handle error condition"))
+            elif 'member' in stripped.lower() or 'vip' in stripped.lower():
+                comments_needed.append((i, f"{prefix}Check membership status"))
+            elif 'valid' in stripped.lower():
+                comments_needed.append((i, f"{prefix}Validate input"))
+            elif 'null' in stripped.lower() or 'none' in stripped.lower() or 'not ' in stripped.lower():
+                comments_needed.append((i, f"{prefix}Check for null/None value"))
+            elif 'in' in stripped.lower() and ('list' in stripped.lower() or 'dict' in stripped.lower()):
+                comments_needed.append((i, f"{prefix}Check if item exists"))
+            else:
+                comments_needed.append((i, f"{prefix}Check condition"))
+
+        elif stripped in ('else:', 'else'):
+            comments_needed.append((i, f"{prefix}Otherwise"))
+
+        elif stripped.startswith(('for ', 'while ')):
+            if 'file' in stripped.lower() or 'path' in stripped.lower():
+                comments_needed.append((i, f"{prefix}Process each file"))
+            elif 'record' in stripped.lower() or 'row' in stripped.lower():
+                comments_needed.append((i, f"{prefix}Process each record"))
+            else:
+                comments_needed.append((i, f"{prefix}Iterate through items"))
+
+        elif stripped.startswith('try:') or stripped.startswith('except'):
+            comments_needed.append((i, f"{prefix}Handle exceptions"))
+
+        elif stripped.startswith('return'):
+            if 'results' in stripped.lower() or 'data' in stripped.lower():
+                comments_needed.append((i, f"{prefix}Return processed data"))
+            elif 'total' in stripped.lower() or 'sum' in stripped.lower():
+                comments_needed.append((i, f"{prefix}Return final result"))
+            else:
+                comments_needed.append((i, f"{prefix}Return value"))
+
+        # Extra patterns
+        if var_name:
+            if 'results' in var_name:
+                comments_needed.append((i, f"{prefix}Initialize results container"))
+            elif 'queue' in var_name or 'stack' in var_name:
+                comments_needed.append((i, f"{prefix}Initialize {var_name} for traversal"))
+
+        if 'soup' in stripped.lower() or 'BeautifulSoup' in stripped:
+            comments_needed.append((i, f"{prefix}Parse HTML content"))
+        elif 'urljoin' in stripped or 'urlparse' in stripped:
+            comments_needed.append((i, f"{prefix}Resolve URL components"))
+        elif 'async' in stripped and 'def' in stripped:
+            async_match = re.search(r'def\s+(\w+)', stripped)
+            if async_match:
+                description = _describe_from_name(async_match.group(1))
+                comments_needed.append((i, f"{prefix}Async method to {description}"))
+
+    # Remove duplicates while preserving order
+    seen: set = set()
     unique = []
     for line_num, comment in comments_needed:
         if line_num not in seen:
@@ -260,27 +374,29 @@ class CodeT5Generator:
 
     def generate_text(self, prompt: str, max_new_tokens: int = 100) -> str:
         """Generate raw text from a prompt using the HF Inference API."""
-        response = requests.post(
-            self.api_url,
-            headers=self.headers,
-            json={
-                "inputs": prompt,
-                "parameters": {
-                    "max_new_tokens": max_new_tokens,
-                    "do_sample": False,
-                    "num_beams": 1,
-                    "repetition_penalty": 2.5,
-                    "no_repeat_ngram_size": 4,
+        try:
+            response = requests.post(
+                self.api_url,
+                headers=self.headers,
+                json={
+                    "inputs": prompt,
+                    "parameters": {
+                        "max_new_tokens": max_new_tokens,
+                        "do_sample": False,
+                        "num_beams": 1,
+                        "repetition_penalty": 2.5,
+                        "no_repeat_ngram_size": 4,
+                    },
+                    "options": {"wait_for_model": True},
                 },
-                "options": {"wait_for_model": True},
-            },
-            timeout=60,
-        )
-        response.raise_for_status()
-        result = response.json()
-
-        if isinstance(result, list) and result:
-            return result[0].get("generated_text", "").strip()
+                timeout=60,
+            )
+            response.raise_for_status()
+            result = response.json()
+            if isinstance(result, list) and result:
+                return result[0].get("generated_text", "").strip()
+        except Exception as e:
+            print(f"[CodeT5Generator] API call failed: {e}")
         return ""
 
     def generate_module_docstring(self, code: str, language: str = "python") -> str:

@@ -5,7 +5,6 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 from contextlib import asynccontextmanager
 from typing import List, Optional, Tuple
 
-import torch
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -238,9 +237,7 @@ def health():
     return {
         "status": "ok",
         "models_loaded": retriever is not None and generator is not None,
-        "device": (
-            torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu"
-        ),
+        "device": "cpu",
     }
 
 

@@ -1,6 +1,6 @@
 ---
 title: Docgen AI Backend
-emoji: robot
+emoji: 🤖
 colorFrom: blue
 colorTo: green
 sdk: docker
