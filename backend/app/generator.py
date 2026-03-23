@@ -6,6 +6,11 @@ import torch
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 from .retriever import RetrievedExample
 
+from huggingface_hub import login
+from .config import settings
+
+if settings.hf_token:
+    login(token=settings.hf_token)
 
 def _lang_rules(language: str) -> Dict[str, str]:
     language = (language or "").lower()

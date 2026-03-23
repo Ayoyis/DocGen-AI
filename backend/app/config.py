@@ -33,7 +33,8 @@ class Settings(BaseSettings):
 
     # ── AI model identifiers ──────────────────────────────────────────────────
     codebert_model: str = "microsoft/codebert-base"
-    codet5_model: str = "Salesforce/codet5-base"
+    codet5_model: str = "Blacklily455/docs-model-codet5"
+    hf_token: str = ""  # Hugging Face token for private models or higher rate limits
 
     # ── Auth & OAuth ──────────────────────────────────────────────────────────
     github_client_id: str = ""
