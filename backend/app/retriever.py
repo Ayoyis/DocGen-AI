@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from typing import List, Optional
 
 import numpy as np
 import faiss
-import torch
-from transformers import AutoTokenizer, AutoModel
+import requests
 
 
 @dataclass
@@ -25,17 +25,14 @@ class CodeBERTRetriever:
         model_name: str,
         index_path: str,
         meta_path: str,
-        device: str = "cuda",
+        device: str = "cpu",  # ignored — embeddings now come from HF API
     ):
-        self.device = (
-            device if torch.cuda.is_available() and device == "cuda" else "cpu"
-        )
+        self.model_name = model_name
+        self.hf_token = os.environ.get("HF_TOKEN", "")
+        self.api_url = f"https://api-inference.huggingface.co/pipeline/feature-extraction/{model_name}"
+        self.headers = {"Authorization": f"Bearer {self.hf_token}"}
 
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model     = AutoModel.from_pretrained(model_name).to(self.device)
-        self.model.eval()
-
-        # ── FIX 3: Wrap file loading with helpful error messages ─────────────
+        # ── Load FAISS index ─────────────────────────────────────────────────
         try:
             self.index = faiss.read_index(index_path)
         except Exception as e:
@@ -43,12 +40,13 @@ class CodeBERTRetriever:
                 f"Could not load FAISS index from '{index_path}': {e}"
             ) from e
 
+        # ── Load metadata ────────────────────────────────────────────────────
         self.meta: List[dict] = []
         try:
             with open(meta_path, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
-                    if line:   # skip blank lines
+                    if line:
                         self.meta.append(json.loads(line))
         except FileNotFoundError:
             raise FileNotFoundError(
@@ -63,32 +61,27 @@ class CodeBERTRetriever:
             f"and {len(self.meta)} metadata entries."
         )
 
-    # ─────────────────────────────────────────────────────────────────────────
-    @torch.no_grad()
     def embed(self, text: str) -> np.ndarray:
-        """Embed a code/text string into a normalised float32 vector."""
-        inputs = self.tokenizer(
-            text,
-            return_tensors="pt",
-            truncation=True,
-            max_length=256,
-            padding=True,
-        ).to(self.device)
+        """Embed a code/text string using HF Inference API."""
+        response = requests.post(
+            self.api_url,
+            headers=self.headers,
+            json={"inputs": text, "options": {"wait_for_model": True}},
+            timeout=30,
+        )
+        response.raise_for_status()
+        result = response.json()
 
-        out    = self.model(**inputs).last_hidden_state
-        mask   = inputs["attention_mask"].unsqueeze(-1)
-        pooled = (out * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1)
+        # Result is a list of token embeddings — mean pool them
+        embeddings = np.array(result, dtype="float32")
+        if embeddings.ndim == 2:
+            vec = embeddings.mean(axis=0)
+        else:
+            vec = embeddings
 
-        # FIX 5: removed redundant .detach() — already inside @torch.no_grad()
-        vec = pooled.squeeze(0).cpu().numpy().astype("float32")
         vec /= np.linalg.norm(vec) + 1e-12
         return vec
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # FIX 6: Added @torch.no_grad() — consistent and future-safe
-    # FIX 4: Moved the "allow top_k=0" comment to inside the method body
-    # ─────────────────────────────────────────────────────────────────────────
-    @torch.no_grad()
     def search(
         self,
         code: str,
@@ -97,35 +90,21 @@ class CodeBERTRetriever:
     ) -> List[RetrievedExample]:
         """
         Retrieve the top-k most similar examples to the given code snippet.
-
-        Args:
-            code: Source code to query against the index.
-            k: Number of results to return. Passing 0 returns an empty list.
-            language: If provided, filter results to this language only.
-
-        Returns:
-            List of RetrievedExample ordered by descending similarity score.
         """
-        # FIX 1a: correct indentation — was 1 space, now 8
-        # Allow callers to pass top_k=0 without crashing
         if k <= 0:
             return []
 
         query_vec = self.embed(code)[None, :]
 
-        # Over-fetch so language filtering still yields k results
-        fetch_k  = min(k * 5, self.index.ntotal) if self.index.ntotal > 0 else k
+        fetch_k = min(k * 5, self.index.ntotal) if self.index.ntotal > 0 else k
         scores, idxs = self.index.search(query_vec, max(fetch_k, 1))
 
         results: List[RetrievedExample] = []
 
         for score, idx in zip(scores[0].tolist(), idxs[0].tolist()):
-            # FIX 1b: correct indentation on continue/break
-            # FAISS returns -1 for unfilled slots
             if idx < 0:
                 continue
 
-            # FIX 2: bounds check — meta and index can fall out of sync
             if idx >= len(self.meta):
                 print(f"[Retriever] Warning: FAISS index returned idx={idx} "
                       f"but meta only has {len(self.meta)} entries. Skipping.")
