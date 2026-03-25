@@ -40,14 +40,17 @@ import os
 
 load_dotenv()
 
-GITHUB_CLIENT_ID = os.getenv("GITHUB_CLIENT_ID")
+GITHUB_CLIENT_ID    = os.getenv("GITHUB_CLIENT_ID")
 GITHUB_CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET")
-GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_ID    = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
-JWT_SECRET = os.getenv("JWT_SECRET")
-MAIL_USERNAME = os.getenv("MAIL_USERNAME")
-MAIL_PASSWORD = os.getenv("MAIL_PASSWORD")
+JWT_SECRET          = os.getenv("JWT_SECRET")
+MAIL_USERNAME       = os.getenv("MAIL_USERNAME")
+MAIL_PASSWORD       = os.getenv("MAIL_PASSWORD")
 
+# ── Deployment URLs ───────────────────────────────────────────────────────────
+FRONTEND_URL = "https://docgen-ai-six.vercel.app"
+BACKEND_URL  = os.getenv("BACKEND_URL", "http://localhost:8000")
 
 # Global model references
 retriever: Optional[CodeBERTRetriever] = None
@@ -73,11 +76,8 @@ async def lifespan(app: FastAPI):
         meta_path=str(settings.meta_path),
         device=settings.device,
     )
-    
-    generator = CodeT5Generator(
-        model_name=settings.codet5_model,
-        device=settings.device,
-    )
+
+    generator = CodeT5Generator(model_name=settings.codet5_model)
     print("Models loaded successfully.")
     yield
 
@@ -94,7 +94,11 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=getattr(settings, "cors_origins", ["http://localhost:3000"]),
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001",
+        FRONTEND_URL,
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -129,7 +133,6 @@ class GenerateResponse(BaseModel):
 # Evaluation models
 class EvaluateRequest(BaseModel):
     test_set: str = "test_set.jsonl"
-    use_retrieval: bool = True
     max_samples: Optional[int] = None
 
 
@@ -301,37 +304,27 @@ def comment_legacy(req: GenerateRequest):
 # Endpoints - Evaluation
 @app.post("/evaluate")
 async def run_evaluation(req: EvaluateRequest):
-    """
-    Run automated evaluation on test set.
-    
-    Example:
-    {
-        "test_set": "test_set.jsonl",
-        "use_retrieval": true,
-        "max_samples": 10
-    }
-    """
+    """Run automated evaluation on test set."""
     try:
         if generator is None:
             raise HTTPException(status_code=503, detail="Models not loaded")
 
         data_manager = TestDataManager()
         test_data = data_manager.load(req.test_set)
-        
+
         if req.max_samples:
             test_data = test_data[:req.max_samples]
-        
-        evaluator = DocGenEvaluator(generator, retriever)
-        
+
+        evaluator = DocGenEvaluator(generator)
+
         with tempfile.TemporaryDirectory() as tmpdir:
             report = evaluator.evaluate_batch(
-                test_data, 
-                use_retrieval=req.use_retrieval,
+                test_data,
                 save_path=tmpdir
             )
-        
+
         return {"status": "success", "report": report}
-        
+
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=f"Test set not found: {e}")
     except Exception as e:
@@ -343,14 +336,14 @@ async def quick_evaluation():
     """Quick evaluation on 3 sample examples."""
     if generator is None:
         raise HTTPException(status_code=503, detail="Models not loaded")
-    
-    evaluator = DocGenEvaluator(generator, retriever)
-    
+
+    evaluator = DocGenEvaluator(generator)
+
     results = []
     for sample in QUICK_TEST_SAMPLES:
-        result = evaluator.evaluate_sample(sample, use_retrieval=True)
+        result = evaluator.evaluate_sample(sample)
         results.append(result.to_dict())
-    
+
     return {
         "status": "success",
         "samples_evaluated": len(results),
@@ -363,40 +356,26 @@ async def compare_modes(req: CompareRequest):
     """Compare RAG vs non-RAG performance."""
     if generator is None:
         raise HTTPException(status_code=503, detail="Models not loaded")
-    
+
     data_manager = TestDataManager()
     test_data = data_manager.load(req.test_set)
-    
+
     if req.max_samples:
         test_data = test_data[:req.max_samples]
-    
-    evaluator = DocGenEvaluator(generator, retriever)
-    
-    # With RAG
-    report_rag = evaluator.evaluate_batch(test_data, use_retrieval=True, save_path=None)
-    
-    # Without RAG
-    report_no_rag = evaluator.evaluate_batch(test_data, use_retrieval=False, save_path=None)
-    
+
+    evaluator = DocGenEvaluator(generator)
+
+    report = evaluator.evaluate_batch(test_data, save_path=None)
+
     return {
         "status": "success",
-        "with_rag": {
-            "bleu": report_rag['metrics']['bleu']['mean'],
-            "rougeL": report_rag['metrics']['rougeL']['mean'],
-            "meteor": report_rag['metrics']['meteor']['mean'],  # ADD THIS
-            "avg_time_ms": report_rag['performance']['avg_generation_time_ms']
-        },
         "without_rag": {
-            "bleu": report_no_rag['metrics']['bleu']['mean'],
-            "rougeL": report_no_rag['metrics']['rougeL']['mean'],
-            "meteor": report_no_rag['metrics']['meteor']['mean'],  # ADD THIS
-            "avg_time_ms": report_no_rag['performance']['avg_generation_time_ms']
+            "bleu":        report['metrics']['bleu']['mean'],
+            "rougeL":      report['metrics']['rougeL']['mean'],
+            "meteor":      report['metrics']['meteor']['mean'],
+            "bertscore_f1": report['metrics']['bertscore_f1']['mean'],
+            "avg_time_ms": report['performance']['avg_generation_time_ms']
         },
-        "improvement": {
-            "bleu": round(report_rag['metrics']['bleu']['mean'] - report_no_rag['metrics']['bleu']['mean'], 4),
-            "rougeL": round(report_rag['metrics']['rougeL']['mean'] - report_no_rag['metrics']['rougeL']['mean'], 4),
-            "meteor": round(report_rag['metrics']['meteor']['mean'] - report_no_rag['metrics']['meteor']['mean'], 4)  # ADD THIS
-        }
     }
 
 
@@ -405,13 +384,9 @@ async def list_datasets():
     """List available test datasets."""
     data_manager = TestDataManager()
     datasets = list(data_manager.data_dir.glob("*.jsonl"))
-    
     return {
         "datasets": [
-            {
-                "name": d.name,
-                "stats": data_manager.get_stats(d.name)
-            }
+            {"name": d.name, "stats": data_manager.get_stats(d.name)}
             for d in datasets
         ]
     }
@@ -424,17 +399,19 @@ async def create_quick_test_set():
     path = data_manager.create_manual_test_set(QUICK_TEST_SAMPLES, "quick_test.jsonl")
     return {"created": path, "samples": len(QUICK_TEST_SAMPLES)}
 
+
 # Auth endpoints
 class SignupRequest(BaseModel):
     name: str
     email: str
     password: str
 
+
 @app.post("/auth/signup")
 def signup(data: SignupRequest, db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == data.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
-    
+
     user = User(
         email=data.email,
         name=data.name,
@@ -450,7 +427,7 @@ def login(email: str = Form(...), password: str = Form(...), db: Session = Depen
     user = db.query(User).filter(User.email == email).first()
     if not user or not verify_password(password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    
+
     token = jwt.encode(
         {"sub": email, "exp": datetime.utcnow() + timedelta(days=7)},
         JWT_SECRET,
@@ -459,116 +436,50 @@ def login(email: str = Form(...), password: str = Form(...), db: Session = Depen
     return {"access_token": token, "token_type": "bearer", "name": user.name}
 
 
-# GitHub OAuth (FREE - no cost)
+# GitHub OAuth
 @app.get("/auth/github")
 def github_login():
     """Redirect to GitHub OAuth"""
-    client_id = GITHUB_CLIENT_ID  # Get from GitHub Settings > Developer > OAuth Apps
-    redirect_uri = "http://localhost:8000/auth/github/callback"
+    redirect_uri = f"{BACKEND_URL}/auth/github/callback"
     scope = "read:user user:email"
-    
-    github_url = f"https://github.com/login/oauth/authorize?client_id={client_id}&redirect_uri={redirect_uri}&scope={scope}"
+    github_url = (
+        f"https://github.com/login/oauth/authorize"
+        f"?client_id={GITHUB_CLIENT_ID}"
+        f"&redirect_uri={redirect_uri}"
+        f"&scope={scope}"
+    )
     return RedirectResponse(github_url)
+
 
 @app.get("/auth/github/callback")
 def github_callback(code: str, db: Session = Depends(get_db)):
     """Handle GitHub OAuth callback"""
     import httpx
-    
-    # Exchange code for token
-    client_id = GITHUB_CLIENT_ID
-    client_secret = GITHUB_CLIENT_SECRET
-    
+
     token_res = httpx.post(
         "https://github.com/login/oauth/access_token",
         headers={"Accept": "application/json"},
         data={
-            "client_id": client_id,
-            "client_secret": client_secret,
+            "client_id": GITHUB_CLIENT_ID,
+            "client_secret": GITHUB_CLIENT_SECRET,
             "code": code,
         },
     )
     token_data = token_res.json()
     access_token = token_data.get("access_token")
-    
+
     if not access_token:
         raise HTTPException(status_code=400, detail="GitHub auth failed")
-    
-    # Get user info
+
     user_res = httpx.get(
         "https://api.github.com/user",
         headers={"Authorization": f"token {access_token}"},
     )
     user_data = user_res.json()
-    
+
     email = user_data.get("email") or f"{user_data['id']}@github.com"
-    name = user_data.get("name") or user_data.get("login")
-    
-    # Create or get user
-    user = db.query(User).filter(User.email == email).first()
-    if not user:
-        user = User(
-            email=email,
-            name=name,
-            hashed_password=get_password_hash(secrets.token_urlsafe(32))  # Random password
-        )
-        db.add(user)
-        db.commit()
-    
-    # Create session token
-    token = jwt.encode(
-        {"sub": email, "exp": datetime.utcnow() + timedelta(days=7)},
-        JWT_SECRET,
-        algorithm="HS256"
-    )
-    
-    # Redirect to frontend with token
-    return RedirectResponse(f"https://docgen-ai.vercel.app/auth/callback?token={token}")
+    name  = user_data.get("name") or user_data.get("login")
 
-# Google OAuth (FREE - no cost for basic usage)
-@app.get("/auth/google")
-def google_login():
-    """Redirect to Google OAuth"""
-    client_id = GOOGLE_CLIENT_ID  # Get from Google Cloud Console
-    redirect_uri = "http://localhost:8000/auth/google/callback"
-    scope = "openid email profile"
-    
-    google_url = f"https://accounts.google.com/o/oauth2/v2/auth?client_id={client_id}&redirect_uri={redirect_uri}&response_type=code&scope={scope}"
-    return RedirectResponse(google_url)
-
-@app.get("/auth/google/callback")
-def google_callback(code: str, db: Session = Depends(get_db)):
-    """Handle Google OAuth callback"""
-    import httpx
-    
-    # Exchange code for token
-    token_res = httpx.post(
-        "https://oauth2.googleapis.com/token",
-        data={
-            "code": code,
-            "client_id": GOOGLE_CLIENT_ID,
-            "client_secret": GOOGLE_CLIENT_SECRET,
-            "redirect_uri": "http://localhost:8000/auth/google/callback",
-            "grant_type": "authorization_code",
-        },
-    )
-    token_data = token_res.json()
-    access_token = token_data.get("access_token")
-    
-    if not access_token:
-        raise HTTPException(status_code=400, detail="Google auth failed")
-    
-    # Get user info
-    user_res = httpx.get(
-        "https://www.googleapis.com/oauth2/v2/userinfo",
-        headers={"Authorization": f"Bearer {access_token}"},
-    )
-    user_data = user_res.json()
-    
-    email = user_data["email"]
-    name = user_data.get("name", email.split("@")[0])
-    
-    # Create or get user
     user = db.query(User).filter(User.email == email).first()
     if not user:
         user = User(
@@ -578,17 +489,82 @@ def google_callback(code: str, db: Session = Depends(get_db)):
         )
         db.add(user)
         db.commit()
-    
+
     token = jwt.encode(
         {"sub": email, "exp": datetime.utcnow() + timedelta(days=7)},
         JWT_SECRET,
         algorithm="HS256"
     )
-    
-    return RedirectResponse(f"http://localhost:3000/auth/callback?token={token}")
+    return RedirectResponse(f"{FRONTEND_URL}/auth/callback?token={token}")
 
-#Forgot Password
-# Email config - use your email credentials
+
+# Google OAuth
+@app.get("/auth/google")
+def google_login():
+    """Redirect to Google OAuth"""
+    redirect_uri = f"{BACKEND_URL}/auth/google/callback"
+    scope = "openid email profile"
+    google_url = (
+        f"https://accounts.google.com/o/oauth2/v2/auth"
+        f"?client_id={GOOGLE_CLIENT_ID}"
+        f"&redirect_uri={redirect_uri}"
+        f"&response_type=code"
+        f"&scope={scope}"
+    )
+    return RedirectResponse(google_url)
+
+
+@app.get("/auth/google/callback")
+def google_callback(code: str, db: Session = Depends(get_db)):
+    """Handle Google OAuth callback"""
+    import httpx
+
+    redirect_uri = f"{BACKEND_URL}/auth/google/callback"
+
+    token_res = httpx.post(
+        "https://oauth2.googleapis.com/token",
+        data={
+            "code": code,
+            "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "redirect_uri": redirect_uri,
+            "grant_type": "authorization_code",
+        },
+    )
+    token_data = token_res.json()
+    access_token = token_data.get("access_token")
+
+    if not access_token:
+        raise HTTPException(status_code=400, detail="Google auth failed")
+
+    user_res = httpx.get(
+        "https://www.googleapis.com/oauth2/v2/userinfo",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    user_data = user_res.json()
+
+    email = user_data["email"]
+    name  = user_data.get("name", email.split("@")[0])
+
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        user = User(
+            email=email,
+            name=name,
+            hashed_password=get_password_hash(secrets.token_urlsafe(32))
+        )
+        db.add(user)
+        db.commit()
+
+    token = jwt.encode(
+        {"sub": email, "exp": datetime.utcnow() + timedelta(days=7)},
+        JWT_SECRET,
+        algorithm="HS256"
+    )
+    return RedirectResponse(f"{FRONTEND_URL}/auth/callback?token={token}")
+
+
+# Forgot / Reset Password
 mail_config = ConnectionConfig(
     MAIL_USERNAME=MAIL_USERNAME,
     MAIL_PASSWORD=MAIL_PASSWORD,
@@ -599,54 +575,56 @@ mail_config = ConnectionConfig(
     MAIL_SSL_TLS=False,
 )
 
+
 class ForgotPasswordRequest(BaseModel):
     email: str
+
 
 class ResetPasswordRequest(BaseModel):
     token: str
     password: str
 
+
 @app.post("/auth/forgot-password")
 async def forgot_password(data: ForgotPasswordRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == data.email).first()
-    
-    # Always return success even if email not found (security best practice)
+
     if not user:
         return {"message": "If that email exists, a reset link has been sent"}
-    
-    # Generate reset token
+
     reset_token = secrets.token_urlsafe(32)
-    
-    # Store token on user (add these columns to your User model)
     user.reset_token = reset_token
     user.reset_token_expiry = datetime.utcnow() + timedelta(hours=1)
     db.commit()
-    
-    # Send email
-    reset_url = f"[localhost](http://localhost:3000/reset-password?token={reset_token})"
+
+    # Use deployed frontend URL for password reset link
+    reset_url = f"{FRONTEND_URL}/reset-password?token={reset_token}"
     message = MessageSchema(
         subject="Reset your password",
         recipients=[data.email],
-        body=f"Click this link to reset your password: {reset_url}\n\nThis link expires in 1 hour.",
+        body=(
+            f"Click this link to reset your password:\n{reset_url}\n\n"
+            f"This link expires in 1 hour."
+        ),
         subtype="plain"
     )
-    
+
     fm = FastMail(mail_config)
     await fm.send_message(message)
-    
+
     return {"message": "If that email exists, a reset link has been sent"}
 
 
 @app.post("/auth/reset-password")
 def reset_password(data: ResetPasswordRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.reset_token == data.token).first()
-    
+
     if not user or user.reset_token_expiry < datetime.utcnow():
         raise HTTPException(status_code=400, detail="Invalid or expired reset token")
-    
+
     user.hashed_password = get_password_hash(data.password)
     user.reset_token = None
     user.reset_token_expiry = None
     db.commit()
-    
+
     return {"message": "Password reset successfully"}
