@@ -1,0 +1,10 @@
+{
+  "status": "success",
+  "without_rag": {
+    "bleu": 0.1583,
+    "rougeL": 0.2585,
+    "meteor": 0.2978,
+    "bertscore_f1": 0.7748,
+    "avg_time_ms": 1353.08
+  }
+}
