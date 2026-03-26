@@ -2,6 +2,8 @@
 from __future__ import annotations
 from typing import List, Dict, Tuple, Optional
 import re
+from unittest import result
+from click import prompt
 import torch
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 from .retriever import RetrievedExample
@@ -798,58 +800,76 @@ def generate_template_docstring(code: str, func_name: str, language: str) -> str
 
 
 class CodeT5Generator:
-    def __init__(self, model_name='Salesforce/codet5-base'):
+    def __init__(self, model_name='Salesforce/codet5-base-multi-sum'):  # CHANGED
         print(f"Loading model: {model_name}")
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
-        # Move to GPU if available
+        # Use base tokenizer with fine-tuned model
+        self.tokenizer = AutoTokenizer.from_pretrained('Salesforce/codet5-base')
+        self.model = AutoModelForSeq2SeqLM.from_pretrained(model_name)  # Fine-tuned for summarization
+        
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(self.device)
         print(f"Model loaded: {self.model.config.model_type}")
         print(f"Device: {self.device}")
 
     @torch.no_grad()
-    def generate_text(self, prompt, max_new_tokens=128, temperature=0.7, num_beams=4):
+    def generate_text(self, code, max_new_tokens=128, num_beams=4):
+        """
+        FIXED: Use Salesforce/codet5-base-multi-sum which is actually fine-tuned for code summarization.
+        """
+        # This model expects raw code, no special prefix
         inputs = self.tokenizer(
-            prompt, 
+            code,  # Just the raw code
             return_tensors="pt", 
             truncation=True, 
             max_length=512,
             padding=True
         )
-
-        # Move to same device as model
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
         outputs = self.model.generate(
             **inputs,
-            max_new_tokens=max_new_tokens,
+            max_length=max_new_tokens,  # Use max_length not max_new_tokens for this model
             num_beams=num_beams,
             early_stopping=True,
             no_repeat_ngram_size=2,
-            temperature=temperature,
-            do_sample=temperature > 0.1,
-            pad_token_id=self.tokenizer.pad_token_id,
-            eos_token_id=self.tokenizer.eos_token_id,
         )
 
         result = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
         return result.strip()
 
     def generate_docstring(self, code: str, language: str = "python", retrieved_examples: list = None) -> str:
-        """Generate using actual CodeT5 model with RAG context."""
-        # Build prompt with retrieved examples
-        prompt_parts = []
-        for ex in retrieved_examples[:3]:
-            prompt_parts.append(f"Code: {ex.code[:200]}\nDoc: {ex.doc[:100]}")
-        prompt_parts.append(f"Code: {code[:300]}\nDoc:")
-        prompt = "\n\n".join(prompt_parts)
+        """
+        FIXED: Generate docstring using actual CodeT5 model.
+        """
+        # Build proper few-shot prompt if we have examples
+        if retrieved_examples:
+            prompt_parts = []
+            for ex in retrieved_examples[:2]:  # Max 2 examples
+                ex_code = ex.code.strip()[:100]
+                ex_doc = ex.doc.strip()[:60]
+                prompt_parts.append(f"Code: {ex_code}\nDocumentation: {ex_doc}")
+        
+            prompt_parts.append(f"Code: {code[:300]}\nDocumentation:")
+            prompt = "\n\n".join(prompt_parts)
+        else:
+            # Zero-shot
+            prompt = f"Code: {code[:400]}\nDocumentation:"
     
-        # Call the actual model
+        # Generate
         output = self.generate_text(prompt, max_new_tokens=128)
     
-        # Clean and format
-        return self._format_output(output, language)
+        # Clean up
+        output = output.strip()
+        if output.startswith('"""'):
+            output = output[3:]
+        if output.endswith('"""'):
+            output = output[:-3]
+    
+        # Format for language
+        if language == 'python':
+            return f'"""{output[:250]}"""'
+        else:
+            return f'/** {output[:250]} */'
 
     def generate_with_timing(self, code: str, language: str, use_retrieval: bool = True) -> Tuple[str, float]:
         """

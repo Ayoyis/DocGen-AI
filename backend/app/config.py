@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     # ── AI model identifiers ──────────────────────────────────────────────────
     codebert_model: str = "microsoft/codebert-base"
     # Use base model - we'll use proper prompting for code-to-text
-    codet5_model: str = "Salesforce/codet5-base"
+    codet5_model: str = "models/codet5-finetuned"  # path to your locally fine-tuned model
     hf_token: str = ""
 
     # ── Auth & OAuth ──────────────────────────────────────────────────────────

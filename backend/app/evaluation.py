@@ -69,12 +69,12 @@ class DocGenEvaluator:
         with open(test_path, 'r', encoding='utf-8') as f:
             return [json.loads(line) for line in f if line.strip()]
 
-    def build_prompt(self, code: str) -> str:
+    def build_prompt(self, code: str, language: str = "python") -> str:
         """
         Build zero-shot prompt for CodeT5.
         Truncated to 512 tokens worth of chars — CodeT5's input limit.
         """
-        return f"summarize: {code[:512]}"
+        return f"Generate a concise docstring for this {language} code: {code[:512]}"
 
     def _normalize_text(self, text: str) -> str:
         """
@@ -98,14 +98,20 @@ class DocGenEvaluator:
         text = re.sub(r'\s+', ' ', text)
         return text
 
-    def generate_with_timing(self, code: str) -> Tuple[str, float]:
+    def generate_with_timing(self, code: str, language: str = "python") -> Tuple[str, float]:
         """Generate a comment for the given code and measure time taken."""
         start_time = time.perf_counter()
-        prompt = self.build_prompt(code)
-        generated = self.generator.generate_text(prompt, max_new_tokens=128)
-        generated = self._clean_model_output(generated, prompt)
+        prompt = self.build_prompt(code, language)
+        generated = self.generator.generate_text(prompt, max_new_tokens=256)
+        cleaned = self._clean_model_output(generated, prompt)
+
+        # Fallback if cleaning wiped the output
+        if not cleaned or len(cleaned.strip()) < 3:
+            logger.warning("Empty output after cleaning — using raw output fallback")
+            cleaned = generated.replace(prompt, "").strip()[:300] or "No documentation generated."
+
         elapsed = time.perf_counter() - start_time
-        return generated, elapsed
+        return cleaned, elapsed
 
     def _clean_model_output(self, text: str, prompt: str) -> str:
         """Clean model output by removing prompt echoes and formatting."""
@@ -184,7 +190,7 @@ class DocGenEvaluator:
         reference = sample['doc']
         code_type = sample.get('code_type', 'module')
 
-        generated, gen_time = self.generate_with_timing(code)
+        generated, gen_time = self.generate_with_timing(code, language)
 
         reference_norm = self._normalize_text(reference)
         generated_norm = self._normalize_text(generated)
