@@ -93,7 +93,7 @@ export default function Navbar() {
           
           <div className="flex flex-col">
             <span className="text-base font-bold bg-gradient-to-r from-white to-slate-300 bg-clip-text text-transparent">
-              DocGen AI
+              CodeSage
             </span>
             <span className="text-[9px] text-slate-500 font-medium tracking-wider uppercase">
               Documentation

@@ -2,7 +2,7 @@ import "./globals.css";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "DocGen AI",
+  title: "CodeSage",
   description: "Generate clean documentation from code using AI",
 };
 
